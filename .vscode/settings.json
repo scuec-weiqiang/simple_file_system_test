@@ -5,6 +5,7 @@
         "ext2.h": "c",
         "malloc.h": "c",
         "compare": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "virtdisk.h": "c"
     }
 }

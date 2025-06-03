@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-31 15:28:59
- * @LastEditTime: 2025-06-02 17:42:09
+ * @LastEditTime: 2025-06-03 23:45:39
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -11,6 +11,8 @@
 #define __EXT2_H__
 
 #include "stdint.h"
+
+#define EXT2_SUPER_MAGIC 0xEF53
 
 typedef struct ext2_fs ext2_fs_t;
 

@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-31 15:28:54
- * @LastEditTime: 2025-06-02 19:18:59
+ * @LastEditTime: 2025-06-03 23:50:39
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -14,9 +14,11 @@
 #include "string.h"
 #include "stdio.h"
 
+#define EXT2_SUPER_MAGIC 0xEF53
 #define EXT2_INODE_DENSITY_PER_GIB 2048
 
 typedef struct ext2_super_block {
+    uint64_t magic;
     uint64_t inodes_count;      // inode总数
     uint64_t free_inodes_count; // 空闲inode数
     uint64_t blocks_count;      // 块总数
@@ -83,6 +85,7 @@ int ext2_fs_format(ext2_fs_t *fs)
     {
         return -1;
     }
+    fs->super->magic = EXT2_SUPER_MAGIC; 
     fs->super->inodes_count = 128;
     fs->super->block_size = BLOCK_SIZE;
     fs->super->blocks_count = DISK_SIZE / fs->super->block_size;
