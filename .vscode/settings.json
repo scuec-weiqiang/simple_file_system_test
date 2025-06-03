@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "string.h": "c",
+        "bitmap.h": "c",
+        "ext2.h": "c",
+        "malloc.h": "c",
+        "compare": "c",
+        "cstdint": "c"
+    }
+}

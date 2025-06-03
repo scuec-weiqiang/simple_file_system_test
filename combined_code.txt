@@ -1,0 +1,463 @@
+
+
+=== ./virtdisk.c ===
+
+/**
+ * @FilePath: /simple_file_system_test/virtdisk.c
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-06-01 15:44:17
+ * @LastEditTime: 2025-06-01 18:58:11
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#include "stdint.h"
+#include "string.h"
+#include "virtdisk.h"
+
+uint8_t hard_disk[DISK_SIZE];//64m虚拟磁盘
+
+void  disk_read(uint8_t* buf, uint64_t sector)
+{
+    memcpy(buf, hard_disk + 512 * sector, 512);
+}
+
+void  disk_write(uint8_t* buf, uint64_t sector)
+{
+    memcpy(hard_disk + 512 * sector, buf, 512);
+}
+
+=== ./bitmap.c ===
+
+/**
+ * @FilePath: /simple_file_system_test/bitmap.c
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-05-30 17:54:37
+ * @LastEditTime: 2025-06-02 17:28:31
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#include "bitmap.h"
+#include "stdio.h"
+#include "string.h"
+#include "malloc.h"
+
+#define PAGE_SIZE 4096
+
+typedef struct bitmap
+{
+    uint64_t *arr;   // bitmap数组
+    size_t size; // bitmap大小（位数）
+}bitmap_t;
+
+
+bitmap_t* bitmap_create(size_t size)
+{
+    if(size==0 || size>UINT64_MAX/8)
+    {
+        printf("bitmap size error\n");
+        return NULL;
+    }
+
+    bitmap_t* bm = (bitmap_t *)malloc(sizeof(bitmap_t));
+    if(bm==NULL)
+    {
+        printf("bitmap: bitmap malloc error\n");
+        return NULL;
+    }
+
+    bm->size = size;
+    uint64_t bytes_num = (size+7)/8;
+    uint64_t pages_num = (bytes_num+PAGE_SIZE-1)/PAGE_SIZE;
+    bm->arr = (uint64_t *)malloc(pages_num*PAGE_SIZE);
+    if(bm->arr==NULL)
+    {
+        printf("bitmap: bitmap.arr malloc error\n");
+        return NULL;
+    }
+
+    memset(bm->arr,0,bytes_num);
+
+    return bm;
+}
+int64_t bitmap_destory(bitmap_t **bm)
+{
+    if((*bm)==NULL||(*bm)->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return -1;
+    }
+
+    (*bm)->size = 0;
+    free((*bm)->arr);
+    (*bm)->arr = NULL;
+    free((*bm));
+    *bm = NULL;
+
+    return 0;
+}
+
+int64_t bitmap_set_bit(bitmap_t *bm, uint64_t index)
+{
+
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return 0;
+    }
+
+    if(index>=bm->size)
+    {
+        printf( ("bitmap: index out of range\n"));
+        return -1;
+    }
+
+    uint64_t uint64_index = index / 64;
+    uint64_t bit_index = index % 64;
+    bm->arr[uint64_index] |= (1 << bit_index);
+    return 0;   
+}
+
+int64_t bitmap_clear_bit(bitmap_t *bm, uint64_t index)
+{
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return 0;
+    }
+    if(index>=bm->size)
+    {
+        printf( ("bitmap: index out of range\n"));
+        return -1;
+    }
+
+    uint64_t uint64_index = index / 64;
+    uint64_t bit_index = index % 64;
+    bm->arr[uint64_index] &= ~(1 << bit_index);
+    return 0;   
+
+}
+
+int64_t bitmap_test_bit(bitmap_t *bm, uint64_t index)
+{
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return 0;
+    }
+
+    if(index>=bm->size)
+    {
+        printf( ("bitmap: index out of range\n"));
+        return -1;
+    }
+    uint64_t uint64_index = index / 64;
+    uint64_t bit_index = index % 64;
+    return (bm->arr[uint64_index] & (1 << bit_index))==0?0:1;
+}
+
+size_t bitmap_get_size(bitmap_t *bm)
+{
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return 0;
+    }
+    return bm->size;
+}
+
+size_t bitmap_get_bytes_num(bitmap_t *bm)
+{
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return 0;
+    }
+    return (bm->size+7)/8;
+}
+
+=== ./virtdisk.h ===
+
+/**
+ * @FilePath: /simple_file_system_test/virtdisk.h
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-06-01 15:44:10
+ * @LastEditTime: 2025-06-02 16:33:57
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#ifndef DISK_H
+#define DISK_H
+
+#include "stdint.h"
+
+#define BLOCK_SIZE 512
+#define DISK_SIZE 64*1024*1024
+
+void  disk_read(uint8_t* buf, uint64_t sector);
+void  disk_write(uint8_t* buf, uint64_t sector);
+
+#define DISK_READ(buf, start,num) \
+    do{\
+        for(int sector = start;sector < (start+num);++sector) \
+        {\
+            disk_read((uint8_t*)buf, sector); \
+        }\
+    }while(0) \
+
+#define DISK_WRITE(buf, start,num) \
+    do{\
+        for(int sector = start;sector < (start+num);++sector) \
+        {\
+            disk_write((uint8_t*)buf, sector); \
+        }\
+    }while(0) \
+
+#endif
+
+=== ./bitmap.h ===
+
+/**
+ * @FilePath: /simple_file_system_test/bitmap.h
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-05-30 17:54:44
+ * @LastEditTime: 2025-06-02 17:31:24
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#ifndef BITMAP_H    
+#define BITMAP_H
+
+#include "stdint.h"
+#include "stddef.h"
+
+typedef struct bitmap bitmap_t;
+
+bitmap_t* bitmap_create(size_t size);
+int64_t bitmap_destory(bitmap_t **bm);
+
+int64_t bitmap_set_bit(bitmap_t *bm, uint64_t index);
+int64_t bitmap_clear_bit(bitmap_t *bm, uint64_t index);
+int64_t bitmap_test_bit(bitmap_t *bm, uint64_t index);
+size_t  bitmap_get_size(bitmap_t *bm);
+size_t  bitmap_get_bytes_num(bitmap_t *bm);
+
+#endif
+
+=== ./main.c ===
+
+/**
+ * @FilePath: /simple_file_system_test/main.c
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-06-01 15:43:40
+ * @LastEditTime: 2025-06-02 17:36:18
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#include "stdio.h"
+#include "ext2.h"
+
+int main() {
+    ext2_fs_t *fs = ext2_fs_create();
+    ext2_fs_format(&fs);
+    printf("super block start pos = %d,num= %d\n", super_block_pos_start, super_block_num);
+
+    return 0;
+}
+
+=== ./ext2.c ===
+
+/**
+ * @FilePath: /simple_file_system_test/ext2.c
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-05-31 15:28:54
+ * @LastEditTime: 2025-06-02 17:38:00
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#include "stdint.h"
+#include "bitmap.h"
+#include "malloc.h"
+#include "virtdisk.h"
+#include "string.h"
+
+
+#define EXT2_INODE_DENSITY_PER_GIB 2048
+
+typedef struct ext2_super_block {
+    uint64_t inodes_count;      // inode总数
+    uint64_t free_inodes_count; // 空闲inode数
+    uint64_t blocks_count;      // 块总数
+    uint64_t free_blocks_count; // 空闲块数
+    uint64_t block_size;    // 块大小(字节)
+    // ... 其他字段
+}ext2_super_block_t;
+
+typedef struct ext2_group_descriptor {
+    uint64_t block_bitmap_start_idx;     // 块位图起始索引
+    uint64_t inode_bitmap_start_idx;     // inode位图起始索引
+    uint64_t inode_table_start_idx;    // inode表起始索引
+    uint64_t data_block_start_idx;  // 第一个数据块起始索引
+}ext2_group_descriptor_t;
+
+typedef struct ext2_inode {
+    uint32_t type;        // 文件类型
+    uint32_t priv;        // 权限
+    uint64_t size;        // 文件大小(字节)
+    uint64_t ctime;       // 创建时间
+    uint64_t blk_idx[13];  // 所在块号
+}ext2_inode_t;
+
+typedef struct ext2_fs
+{
+    ext2_super_block_t *super; 
+    ext2_group_descriptor_t *group; 
+    bitmap_t *block_bitmap; 
+    bitmap_t *inode_bitmap; 
+    ext2_inode_t *inode_table; 
+}ext2_fs_t;
+
+uint64_t super_block_pos_start = 0,super_block_num = 0;
+uint64_t group_block_pos_start = 0,group_block_num = 0;
+uint64_t block_bitmap_block_pos_start = 0,block_bitmap_block_num = 0;
+uint64_t inode_bitmap_block_pos_start = 0,inode_bitmap_block_num = 0;
+uint64_t inode_table_block_pos_start = 0,inode_table_block_num = 0;
+uint64_t data_block_pos_start = 0,data_block_num;
+
+
+ext2_fs_t* ext2_fs_create()
+{
+    ext2_fs_t* fs = malloc(sizeof(ext2_fs_t));
+    if(fs==NULL)
+    {
+        return NULL;
+    }
+
+    return fs;
+}
+
+int ext2_fs_format(ext2_fs_t *fs)
+{
+    uint64_t now_block_pos = 0;
+
+    //配置super_block
+    super_block_pos_start = now_block_pos;
+    super_block_num = 1;
+    fs->super = (ext2_super_block_t *)malloc(BLOCK_SIZE);
+    if(fs->super == NULL)
+    {
+        return -1;
+    }
+    fs->super->inodes_count = EXT2_INODE_DENSITY_PER_GIB * (DISK_SIZE / 1024);
+    fs->super->block_size = BLOCK_SIZE;
+    fs->super->blocks_count = DISK_SIZE / fs->super->block_size;
+    fs->super->free_blocks_count = fs->super->blocks_count;
+    fs->super->free_inodes_count = fs->super->inodes_count;
+
+    now_block_pos += super_block_num;
+
+
+
+    group_block_pos_start = now_block_pos; //记录group的位置
+    super_block_num = 1;
+    //不急着配置group_descriptor,先预留空间,因为他的值要和后面的位图和inode表的位置有关
+    fs->group = (ext2_group_descriptor_t *)malloc(BLOCK_SIZE);
+    if(fs->group == NULL)
+    {
+        return -1;
+    }
+    now_block_pos += group_block_num;
+
+
+
+    //创建两个位图
+    block_bitmap_block_pos_start = now_block_pos;
+    fs->block_bitmap = bitmap_create(fs->super->blocks_count);
+    if(fs->block_bitmap == NULL)
+    {
+        return -1;
+    }
+    block_bitmap_block_num = bitmap_get_bytes_num(&fs->block_bitmap)/BLOCK_SIZE; //计算块位图所占的块数
+    now_block_pos += block_bitmap_block_num;
+
+    inode_bitmap_block_pos_start = now_block_pos;
+    fs->inode_bitmap = bitmap_create(fs->super->inodes_count);
+    if(fs->inode_bitmap == NULL)
+    {
+        return -1;
+    }
+    inode_bitmap_block_num = bitmap_get_bytes_num(&fs->inode_bitmap)/BLOCK_SIZE; //计算inode位图所占的块数
+    now_block_pos += inode_bitmap_block_num;
+
+    //创建inode表
+    inode_table_block_pos_start = now_block_pos;
+    fs->inode_table = (ext2_inode_t *)malloc(sizeof(ext2_inode_t) * fs->super->inodes_count);
+    if(fs->inode_table == NULL)
+    {
+        return -1;
+    }
+    memset(fs->inode_table, 0, sizeof(ext2_inode_t) * fs->super->inodes_count);
+    inode_table_block_num = (sizeof(ext2_inode_t) * fs->super->inodes_count)/BLOCK_SIZE; //计算inode表所占的块数
+    now_block_pos += inode_table_block_num;
+
+    //剩下的全是数据块
+    data_block_pos_start = now_block_pos;
+    data_block_num = fs->super->blocks_count - now_block_pos;
+
+    //到这开始配置group_descriptor
+    fs->group->block_bitmap_start_idx = block_bitmap_block_pos_start;
+    fs->group->inode_bitmap_start_idx = inode_bitmap_block_pos_start;
+    fs->group->inode_table_start_idx = inode_table_block_pos_start;
+    fs->group->data_block_start_idx = data_block_pos_start;
+
+    //把前面占用的block写入block_bitmap
+    for (size_t i = super_block_pos_start; i < data_block_pos_start; i++)
+    {
+        bitmap_set(fs->block_bitmap,i);
+    }
+    
+    //统一写入
+    DISK_WRITE(fs->super,super_block_pos_start,super_block_num);
+    DISK_WRITE(fs->group,group_block_pos_start,group_block_num);
+    DISK_WRITE(fs->block_bitmap,block_bitmap_block_pos_start,block_bitmap_block_num);
+    DISK_WRITE(fs->inode_bitmap,inode_bitmap_block_pos_start,inode_bitmap_block_num);
+    DISK_WRITE(fs->inode_table,inode_table_block_pos_start,inode_table_block_num);
+
+    return 0;
+}
+
+=== ./ext2.h ===
+
+/**
+ * @FilePath: /simple_file_system_test/ext2.h
+ * @Description:  
+ * @Author: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Date: 2025-05-31 15:28:59
+ * @LastEditTime: 2025-06-02 17:19:05
+ * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
+ * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
+*/
+#ifndef __EXT2_H__
+#define __EXT2_H__
+
+#include "stdint.h"
+
+typedef struct ext2_fs ext2_fs_t;
+
+uint64_t super_block_pos_start,super_block_num;
+uint64_t group_block_pos_start,group_block_num;
+uint64_t block_bitmap_block_pos_start,block_bitmap_block_num;
+uint64_t inode_bitmap_block_pos_start,inode_bitmap_block_num;
+uint64_t inode_table_block_pos_start,inode_table_block_num;
+uint64_t data_block_pos_start,data_block_num;
+
+ext2_fs_t* ext2_fs_create();
+int ext2_fs_format(ext2_fs_t *fs);
+
+
+#endif
