@@ -10,13 +10,11 @@
 #include "stdio.h"
 #include "ext2.h"
 #include "stddef.h"
+#include "assert.h"
 
 int main() {
     ext2_fs_t *fs = ext2_fs_create();
-    if(fs==NULL)
-    {
-        printf("NULL\n");
-    }
+    assert(fs != NULL); 
     ext2_fs_format(fs);
 
     return 0;

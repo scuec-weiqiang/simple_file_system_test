@@ -13,6 +13,7 @@
 #include "virtdisk.h"
 #include "string.h"
 #include "stdio.h"
+#include "assert.h"
 
 #define EXT2_SUPER_MAGIC 0xEF53
 #define EXT2_INODE_DENSITY_PER_GIB 2048
@@ -60,8 +61,16 @@ uint64_t inode_table_block_pos_start = 0,inode_table_block_num = 0;
 uint64_t data_block_pos_start = 0,data_block_num;
 
 
+/**
+ * @brief 创建一个ext2文件系统
+ *
+ * 该函数用于创建一个新的ext2文件系统。它会为文件系统分配内存，并初始化其超级块、组描述符、块位图、inode位图以及inode表。
+ *
+ * @return 指向新创建的ext2文件系统的指针，如果创建失败则返回NULL。
+ */
 ext2_fs_t* ext2_fs_create()
 {
+    // 分配 ext2_fs_t 结构体内存
     ext2_fs_t* fs = malloc(sizeof(ext2_fs_t));
     if(fs==NULL)
     {
@@ -69,36 +78,63 @@ ext2_fs_t* ext2_fs_create()
         return NULL;
     }
 
+    // 分配 ext2_super_block_t 结构体内存，并初始化
+    fs->super = (ext2_super_block_t *)malloc(BLOCK_SIZE);
+    // 设置文件系统魔数
+    fs->super->magic = EXT2_SUPER_MAGIC; 
+    // 设置 inode 数量
+    fs->super->inodes_count = 128;
+    // 设置块大小
+    fs->super->block_size = BLOCK_SIZE;
+    // 设置块数量
+    fs->super->blocks_count = DISK_SIZE / fs->super->block_size;
+
+    // 分配 ext2_group_descriptor_t 结构体内存
+    fs->group = (ext2_group_descriptor_t *)malloc(BLOCK_SIZE);
+    // 创建块位图
+    fs->block_bitmap = bitmap_create(fs->super->blocks_count);  
+    // 创建 inode 位图
+    fs->inode_bitmap = bitmap_create(fs->super->inodes_count);
+    // 分配 inode 表内存
+    fs->inode_table = (ext2_inode_t *)malloc(sizeof(ext2_inode_t) * fs->super->inodes_count);
+
+    // 打印创建成功信息
     printf("create!\n");
     return fs;
 }
 
-int ext2_fs_format(ext2_fs_t *fs)
+/**
+ * @brief 格式化 ext2 文件系统
+ *
+ * 该函数用于初始化并格式化 ext2 文件系统。它将文件系统结构（如超级块、组描述符、位图和 inode 表）写入磁盘，
+ * 并配置各个结构的位置和大小。
+ *
+ * @param fs ext2 文件系统结构体指针
+ *
+ * @return 格式化成功返回 0，失败返回 -1
+ */
+int64_t ext2_fs_format(ext2_fs_t *fs)
 {
     uint64_t now_block_pos = 0;
 
-    //配置super_block
+    // 配置super_block
     super_block_pos_start = now_block_pos;
     super_block_num = 1;
-    fs->super = (ext2_super_block_t *)malloc(BLOCK_SIZE);
     if(fs->super == NULL)
     {
         return -1;
     }
     fs->super->magic = EXT2_SUPER_MAGIC; 
-    fs->super->inodes_count = 128;
-    fs->super->block_size = BLOCK_SIZE;
-    fs->super->blocks_count = DISK_SIZE / fs->super->block_size;
-    fs->super->free_blocks_count = fs->super->blocks_count;
-    fs->super->free_inodes_count = fs->super->inodes_count;
+    fs->super->free_blocks_count = DISK_SIZE / fs->super->block_size;
+    fs->super->free_inodes_count = 128;
     now_block_pos += super_block_num;
 
 
-
+    // 配置group_descriptor
     group_block_pos_start = now_block_pos; //记录group的位置
     super_block_num = 1;
     //不急着配置group_descriptor,先预留空间,因为他的值要和后面的位图和inode表的位置有关
-    fs->group = (ext2_group_descriptor_t *)malloc(BLOCK_SIZE);
+    
     if(fs->group == NULL)
     {
         return -1;
@@ -106,33 +142,26 @@ int ext2_fs_format(ext2_fs_t *fs)
     now_block_pos += group_block_num;
 
 
-
-    //创建两个位图
+    // 配置两个位图
     block_bitmap_block_pos_start = now_block_pos;
-    fs->block_bitmap = bitmap_create(fs->super->blocks_count);
     if(fs->block_bitmap == NULL)
     {
         return -1;
     }
-
     block_bitmap_block_num = (bitmap_get_bytes_num(fs->block_bitmap)+511)/BLOCK_SIZE; //计算块位图所占的块数
     now_block_pos += block_bitmap_block_num;
 
-
     inode_bitmap_block_pos_start = now_block_pos;
-    printf("inodex count=%ld\n",fs->super->inodes_count);
-    fs->inode_bitmap = bitmap_create(fs->super->inodes_count);
     if(fs->inode_bitmap == NULL)
     {
         return -1;
     }
-    
     inode_bitmap_block_num = (bitmap_get_bytes_num(fs->inode_bitmap)+511)/BLOCK_SIZE; //计算inode位图所占的块数
     now_block_pos += inode_bitmap_block_num;
 
-    //创建inode表
+
+    // 配置inode表
     inode_table_block_pos_start = now_block_pos;
-    fs->inode_table = (ext2_inode_t *)malloc(sizeof(ext2_inode_t) * fs->super->inodes_count);
     if(fs->inode_table == NULL)
     {
         return -1;
@@ -141,34 +170,36 @@ int ext2_fs_format(ext2_fs_t *fs)
     inode_table_block_num = (sizeof(ext2_inode_t) * fs->super->inodes_count)/BLOCK_SIZE; //计算inode表所占的块数
     now_block_pos += inode_table_block_num;
 
-    //剩下的全是数据块
+
+    // 配置数据块
     data_block_pos_start = now_block_pos;
     data_block_num = fs->super->blocks_count - now_block_pos;
 
-        
 
-    //到这开始配置group_descriptor
+    // 配置group_descriptor
     fs->group->block_bitmap_start_idx = block_bitmap_block_pos_start;
     fs->group->inode_bitmap_start_idx = inode_bitmap_block_pos_start;
     fs->group->inode_table_start_idx = inode_table_block_pos_start;
     fs->group->data_block_start_idx = data_block_pos_start;
 
-    // printf("super_block_start_idx=%ld\n",super_block_pos_start);
-    // printf("block_bitmap_start_idx=%ld\n",fs->group->block_bitmap_start_idx);
-    // printf("inode_bitmap_start_idx=%ld\n",fs->group->inode_bitmap_start_idx);
-    // printf("inode_bitmap_block_num=%ld\n",inode_bitmap_block_num);
+
+    printf("super_block_start_idx=%ld\n",super_block_pos_start);
+    printf("block_bitmap_start_idx=%ld\n",fs->group->block_bitmap_start_idx);
+    printf("inode_bitmap_start_idx=%ld\n",fs->group->inode_bitmap_start_idx);
+    printf("inode_bitmap_block_num=%ld\n",inode_bitmap_block_num);
     
-    // printf("inode_table_start_idx=%ld\n",fs->group->inode_table_start_idx);
-    // printf("data_block_start_idx=%ld\n",fs->group->data_block_start_idx);
+    printf("inode_table_start_idx=%ld\n",fs->group->inode_table_start_idx);
+    printf("data_block_start_idx=%ld\n",fs->group->data_block_start_idx);
 
 
-    //把前面占用的block写入block_bitmap
+    // 把前面占用的block写入block_bitmap
     for (size_t i = super_block_pos_start; i < data_block_pos_start; i++)
     {
         bitmap_set_bit(fs->block_bitmap,i);
     }
     
-    //统一写入
+
+    // 统一写入
     DISK_WRITE(fs->super,super_block_pos_start,super_block_num);
     DISK_WRITE(fs->group,group_block_pos_start,group_block_num);
     DISK_WRITE(fs->block_bitmap,block_bitmap_block_pos_start,block_bitmap_block_num);
@@ -177,3 +208,8 @@ int ext2_fs_format(ext2_fs_t *fs)
 
     return 0;
 }
+
+// int64_t ext2_fs_load(ext2_fs_t *fs)
+// {
+
+// }

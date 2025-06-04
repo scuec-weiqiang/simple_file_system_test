@@ -24,7 +24,7 @@ extern uint64_t inode_table_block_pos_start,inode_table_block_num;
 extern uint64_t data_block_pos_start,data_block_num;
 
 extern ext2_fs_t* ext2_fs_create();
-extern int ext2_fs_format(ext2_fs_t *fs);
+extern int64_t ext2_fs_format(ext2_fs_t *fs);
 
 
 #endif

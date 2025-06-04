@@ -6,6 +6,7 @@
         "malloc.h": "c",
         "compare": "c",
         "cstdint": "c",
-        "virtdisk.h": "c"
+        "virtdisk.h": "c",
+        "assert.h": "c"
     }
 }
