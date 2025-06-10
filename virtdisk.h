@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-06-01 15:44:10
- * @LastEditTime: 2025-06-02 18:03:50
+ * @LastEditTime: 2025-06-05 14:43:37
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -22,15 +22,15 @@ void  disk_write(uint8_t* buf, uint64_t sector);
     do{\
         for(uint64_t sector = start;sector < (start+num);++sector) \
         {\
-            disk_read((uint8_t*)buf, sector); \
+            disk_read(((uint8_t*)buf+sector*BLOCK_SIZE), sector); \
         }\
     }while(0) \
 
-#define DISK_WRITE(buf, start,num) \
+#define DISK_WRITE(data, start,num) \
     do{\
         for(uint64_t sector = start;sector < (start+num);++sector) \
         {\
-            disk_write((uint8_t*)buf, sector); \
+            disk_write(((uint8_t*)data+sector*BLOCK_SIZE), sector); \
         }\
     }while(0) \
 

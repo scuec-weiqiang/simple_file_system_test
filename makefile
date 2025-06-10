@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99  # 编译选项（开启警告、C99 标准）
-SRC = virtdisk.c bitmap.c ext2.c main.c assert.c  # 所有源文件
+SRC = virtdisk.c bitmap.c ext2.c main.c   # 所有源文件
 OBJ = $(SRC:.c=.o)
 EXEC = simple_fs_test  # 生成的可执行文件名
 all: $(EXEC)

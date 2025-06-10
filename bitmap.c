@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-30 17:54:37
- * @LastEditTime: 2025-06-02 17:28:31
+ * @LastEditTime: 2025-06-05 17:09:32
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -84,7 +84,9 @@ int64_t bitmap_set_bit(bitmap_t *bm, uint64_t index)
 
     uint64_t uint64_index = index / 64;
     uint64_t bit_index = index % 64;
-    bm->arr[uint64_index] |= (1 << bit_index);
+
+    bm->arr[uint64_index] |= (1ULL << bit_index);
+
     return 0;   
 }
 
@@ -103,7 +105,7 @@ int64_t bitmap_clear_bit(bitmap_t *bm, uint64_t index)
 
     uint64_t uint64_index = index / 64;
     uint64_t bit_index = index % 64;
-    bm->arr[uint64_index] &= ~(1 << bit_index);
+    bm->arr[uint64_index] &= ~(1ULL << bit_index);
     return 0;   
 
 }
@@ -123,7 +125,7 @@ int64_t bitmap_test_bit(bitmap_t *bm, uint64_t index)
     }
     uint64_t uint64_index = index / 64;
     uint64_t bit_index = index % 64;
-    return (bm->arr[uint64_index] & (1 << bit_index))==0?0:1;
+    return (bm->arr[uint64_index] & (1ULL << bit_index))==0?0:1;
 }
 
 size_t bitmap_get_size(bitmap_t *bm)
@@ -145,3 +147,34 @@ size_t bitmap_get_bytes_num(bitmap_t *bm)
     }
     return (bm->size+7)/8;
 }
+
+int64_t bitmap_scan_0(bitmap_t *bm)
+{
+    if(bm==NULL||bm->arr==NULL)
+    {
+        printf("bitmap: bitmap is not created\n");
+        return -1;
+    }
+
+    for(uint64_t i=0;i<bm->size;i++)
+    {
+        if(bm->arr[i]!=UINT64_MAX)
+        {
+            uint8_t* arr=(uint8_t*)&bm->arr[i];
+            for(uint8_t j=0;j<8;j++)
+            {
+                if(arr[j]!=UINT8_MAX)
+                {
+                    for(uint8_t k=0;k<8;k++)
+                    {
+                        if((arr[j]&(1<<k)) == 0)
+                        {
+                            return i*64+j*8+k;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return -1;
+}  
