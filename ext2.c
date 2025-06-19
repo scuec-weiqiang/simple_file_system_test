@@ -317,18 +317,50 @@ int64_t ext2_read_file(ext2_fs_t *fs, uint64_t inode_idx, void *buf)
     return 0;
 }
 
-int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name)
+/**
+ * @brief 在目录中查找文件或子目录
+ *
+ * 在指定的ext2文件系统中，查找指定目录下的文件名对应的inode索引。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param dir_inode_idx 目录的inode索引
+ * @param name 要查找的文件名
+ *
+ * @return 如果找到匹配的文件名，则返回对应的inode索引；否则返回-1。
+ */
+int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
 {
     assert(fs!=NULL,return -1;);
     assert(name!=NULL,return -1;);
-    
-    char filename[MAX_FILENAME_LEN];
-    uint64_t i = 0;
-    while(name[i]!=0)
-    {
-        
-    }
+    assert(inode_idx<fs->super->inodes_count,return -1;);
+    assert(fs->inode_table[inode_idx].type == FILE_TYPE_DIR,return -1;);
 
+    uint64_t blocks_used_num = (fs->inode_table[inode_idx].size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    uint64_t all_entry_num =  fs->inode_table[inode_idx].size / sizeof(ext2_dir_entry_t);
+
+    for(uint64_t i = 0; i < blocks_used_num; i++)
+    {
+        // 获取目录块索引，并读取该块的全部内容
+        uint64_t blk_idx =  fs->inode_table[inode_idx].blk_idx[i];
+        uint8_t entry_buf[BLOCK_SIZE];
+        disk_read((uint8_t*)&entry_buf, blk_idx); 
+        // 计算当前块中目录项的数量
+        uint64_t block_entry_num = all_entry_num - i * (BLOCK_SIZE / sizeof(ext2_dir_entry_t));
+        if(block_entry_num > BLOCK_SIZE / sizeof(ext2_dir_entry_t)) 
+        {
+            block_entry_num = BLOCK_SIZE / sizeof(ext2_dir_entry_t);
+        }
+        for(uint64_t i = 0; i < block_entry_num;i++)
+        {
+            ext2_dir_entry_t entry;
+            entry = ((ext2_dir_entry_t*)entry_buf)[i]; // 读取目录项 
+            // 检查文件名是否匹配
+            if (strcmp(entry.name, name) == 0)
+            {
+                return entry.inode_idx; // 返回匹配的inode索引
+            }
+        }
+    }
 }
 
 int64_t ext2_create_file(const char* path)
