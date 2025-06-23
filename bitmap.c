@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-30 17:54:37
- * @LastEditTime: 2025-06-05 17:09:32
+ * @LastEditTime: 2025-06-21 01:44:10
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -46,7 +46,7 @@ bitmap_t* bitmap_create(size_t size)
         return NULL;
     }
 
-    memset(bm->arr,0,bytes_num);
+    memset(bm->arr,0,pages_num*PAGE_SIZE);
 
     return bm;
 }

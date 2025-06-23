@@ -8,6 +8,10 @@
         "cstdint": "c",
         "virtdisk.h": "c",
         "assert.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "stdint.h": "c",
+        "typeinfo": "c",
+        "strings.h": "c",
+        "errno.h": "c"
     }
 }

@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-31 15:28:54
- * @LastEditTime: 2025-06-08 22:34:15
+ * @LastEditTime: 2025-06-21 02:08:42
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -14,6 +14,20 @@
 #include "string.h"
 #include "stdio.h"
 #include "assert.h"
+#include "errno.h"
+
+char *strdup(const char *s) {
+    if (s == NULL) return NULL;
+    
+    size_t len = strlen(s) + 1;  // 计算长度（含结束符）
+    char *dup = malloc(len);     // 分配内存
+    
+    if (dup != NULL) {
+        strcpy(dup, s);          // 复制字符串
+    }
+    
+    return dup;
+}
 
 #define EXT2_INODE_DENSITY_PER_GIB 2048
 
@@ -109,8 +123,6 @@ ext2_fs_t* ext2_fs_create()
     // 分配 inode 表内存
     fs->inode_table = (ext2_inode_t *)malloc(sizeof(ext2_inode_t) * fs->super->inodes_count);
 
-    // 打印创建成功信息
-    printf("create!\n");
     return fs;
 }
 
@@ -170,7 +182,6 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
     assert(fs->inode_table!=NULL,return -1);
     memset(fs->inode_table, 0, sizeof(ext2_inode_t) * fs->super->inodes_count);
     inode_table_block_num = (sizeof(ext2_inode_t) * fs->super->inodes_count)/BLOCK_SIZE; //计算inode表所占的块数
-    fs->inode_table[ROOT_INODE_IDX].type = FILE_TYPE_DIR; // 第一个inode设为根目录
     now_block_pos += inode_table_block_num;
 
 
@@ -188,11 +199,11 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
     fs->group->data_block_start_idx = data_block_pos_start;
     fs->group->data_block_num = data_block_num;
 
-    printf("super_block_start_idx=%ld\n",super_block_pos_start);
-    printf("block_bitmap_start_idx=%ld\n",fs->group->block_bitmap_start_idx);
-    printf("inode_bitmap_start_idx=%ld\n",fs->group->inode_bitmap_start_idx);
-    printf("inode_table_start_idx=%ld\n",fs->group->inode_table_start_idx);
-    printf("data_block_start_idx=%ld\n",fs->group->data_block_start_idx);
+    // printf("super_block_start_idx=%ld\n",super_block_pos_start);
+    // printf("block_bitmap_start_idx=%ld\n",fs->group->block_bitmap_start_idx);
+    // printf("inode_bitmap_start_idx=%ld\n",fs->group->inode_bitmap_start_idx);
+    // printf("inode_table_start_idx=%ld\n",fs->group->inode_table_start_idx);
+    // printf("data_block_start_idx=%ld\n",fs->group->data_block_start_idx);
 
 
     // 把前面占用的block写入block_bitmap
@@ -202,6 +213,14 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
         // printf("%d,blockbitmap = %lx\n",i,((uint64_t*)((uint64_t*)fs->block_bitmap)[0])[0] );
     }
     
+    bitmap_set_bit(fs->inode_bitmap, ROOT_INODE_IDX); // 设置根目录的inode位图
+    fs->super->free_inodes_count--; // 根目录的inode已经被分配
+    fs->inode_table[ROOT_INODE_IDX].type = FILE_TYPE_DIR; // 第一个inode设为根目录
+    fs->inode_table[ROOT_INODE_IDX].priv = 0; // 权限设置为0
+    fs->inode_table[ROOT_INODE_IDX].size = 0; // 初始大小为0
+    fs->inode_table[ROOT_INODE_IDX].ctime = 1; // 创建时间设为1
+    // fs->inode_table[ROOT_INODE_IDX].blk_idx[0] = ext2_alloc_block(fs); // 分配一个数据块给根目录
+   
     // 统一写入
     DISK_WRITE(fs->super,super_block_pos_start,super_block_num);
     DISK_WRITE(fs->group,group_block_pos_start,group_block_num);
@@ -212,6 +231,15 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
     return 0;
 }
 
+/*
+* @brief 加载 ext2 文件系统
+*
+* 该函数用于从磁盘加载 ext2 文件系统的超级块、组描述符、块位图、inode 位图和 inode 表。
+*
+* @param fs 指向 ext2 文件系统的指针
+*
+* @return 成功返回 0，失败返回 -1
+*/
 int64_t ext2_fs_load(ext2_fs_t *fs)
 {
     assert(fs!=NULL,return -1;);
@@ -233,13 +261,16 @@ int64_t ext2_alloc_block(ext2_fs_t *fs)
     assert(fs!=NULL,return -1;);
     assert(fs->super->free_blocks_count>=0,return -1;);
 
-    uint64_t ret =  bitmap_scan_0(fs->block_bitmap);
+    int64_t ret = bitmap_scan_0(fs->block_bitmap);
     
-    if(ret>=0)
+    if(ret<0)
     {
-        bitmap_set_bit(fs->block_bitmap,ret);
-        fs->super->free_blocks_count--;
+        printf("No free blocks available.\n");
+        return ERROR_NOT_FREE; // 没有可用的块
     }
+   
+    bitmap_set_bit(fs->block_bitmap,ret);
+    fs->super->free_blocks_count--;
     return ret;
 
 }
@@ -247,19 +278,49 @@ int64_t ext2_alloc_block(ext2_fs_t *fs)
 int64_t ext2_free_block(ext2_fs_t *fs,uint64_t idx)
 {
     assert(fs!=NULL,return -1;);
-    uint64_t ret = bitmap_clear_bit(fs->block_bitmap,idx);
-    if(ret>=0)
+    int64_t ret = bitmap_clear_bit(fs->block_bitmap,idx);
+    if(ret<0)
     {
-        fs->super->free_blocks_count++;
+        return FAILED; // 没有可用的块
     }
+    fs->super->free_blocks_count++;
+    return ret;
+}
+int64_t ext2_alloc_inode(ext2_fs_t *fs)
+{
+    assert(fs!=NULL,return -1;);
+    assert(fs->super->free_inodes_count>=0,return -1;);
+
+    int64_t ret =  bitmap_scan_0(fs->inode_bitmap);
+    if(ret<0)
+    {
+        printf("No free inodes available.\n");
+        return ret; // 没有可用的inode
+    }
+  
+    bitmap_set_bit(fs->inode_bitmap,(uint64_t)ret);
+    fs->super->free_inodes_count--;
+    return ret;
+
+}
+
+int64_t ext2_free_inode(ext2_fs_t *fs,uint64_t idx)
+{
+    assert(fs!=NULL,return -1;);
+    int64_t ret = bitmap_clear_bit(fs->inode_bitmap,idx);
+    if(ret<0)
+    {
+        return FAILED; // 没有可用的inode
+    }
+    fs->super->free_inodes_count++;
     return ret;
 }
 
-
-int64_t ext2_write_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uint64_t size)
+int64_t ext2_overwrite_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uint64_t size)
 {
     assert(fs!=NULL,return -1;);
-    assert(inode_idx<fs->super->blocks_count && inode_idx>=fs->group->data_block_start_idx,return -1;);
+    
+    assert(inode_idx<fs->super->inodes_count,return -1;);
     assert(data!=NULL,return -1;);
 
     uint64_t blocks_needed = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -291,6 +352,49 @@ int64_t ext2_write_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uin
     fs->inode_table[inode_idx].ctime++;
 
     DISK_WRITE(fs->inode_table, fs->group->inode_table_start_idx, fs->group->inode_table_block_num);
+    // disk_write(fs->inode_table, fs->group->inode_table_start_idx + inode_idx * sizeof(ext2_inode_t)/ BLOCK_SIZE);
+    return 0;
+
+}
+
+int64_t ext2_append_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uint64_t size)
+{
+    assert(fs!=NULL,return -1;);
+    assert(inode_idx<fs->super->inodes_count,return -1;);
+    assert(data!=NULL,return -1;);
+
+    ext2_inode_t *dir_inode = &fs->inode_table[inode_idx];
+    // 计算追加之后需要的块数
+    uint64_t blocks_needed = (dir_inode->size + size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    
+    assert(blocks_needed<=13&&blocks_needed<=fs->super->free_blocks_count,return -1;);
+
+    uint64_t blocks_used = (dir_inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for(uint64_t i=blocks_used;i<blocks_needed;i++)
+    {
+        dir_inode->blk_idx[i] = ext2_alloc_block(fs); // 多出来的部分分配空间
+    }
+
+    for(uint64_t i = blocks_used;i<blocks_needed;i++)
+    {
+        uint64_t append_in_which_byte = dir_inode->size % BLOCK_SIZE; // 追加到这个块的哪个字节
+        uint8_t *data_ptr = (uint8_t*)data;
+        uint8_t temp_buf[BLOCK_SIZE];
+        // 读取当前块内容
+        disk_read(temp_buf, dir_inode->blk_idx[i]);
+        
+        // 将新目录项写入到当前块
+        memcpy(temp_buf + append_in_which_byte,data_ptr, BLOCK_SIZE- append_in_which_byte);
+        data_ptr += BLOCK_SIZE - append_in_which_byte; // 更新指针，指向下一个要写入的数据
+        // 写回块
+        disk_write(temp_buf, dir_inode->blk_idx[i]);
+    }
+        
+    dir_inode->size += size;
+    dir_inode->ctime++;
+    // 更新目录的inode信息
+    DISK_WRITE(fs->inode_table, fs->group->inode_table_start_idx, fs->group->inode_table_block_num);
 
     return 0;
 
@@ -300,7 +404,7 @@ int64_t ext2_write_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uin
 int64_t ext2_read_file(ext2_fs_t *fs, uint64_t inode_idx, void *buf)
 {
     assert(fs!=NULL,return -1;);
-    assert(inode_idx<fs->super->blocks_count && inode_idx>=fs->group->data_block_start_idx,return -1;);
+    assert(inode_idx<fs->super->inodes_count,return -1;);
     assert(buf!=NULL,return -1;);
 
     uint64_t blocks_used = (fs->inode_table[inode_idx].size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -308,12 +412,7 @@ int64_t ext2_read_file(ext2_fs_t *fs, uint64_t inode_idx, void *buf)
     for(uint64_t i = 0;i<blocks_used;i++)
     {
         disk_read((uint8_t*)buf+i*BLOCK_SIZE,fs->inode_table[inode_idx].blk_idx[i]);
-        // printf("%s \n",(uint8_t*)buf+i*BLOCK_SIZE);
     }
-
-    printf("blocks_used = %ld\n",blocks_used);
-    printf("size = %ld\n",fs->inode_table[inode_idx].size);
-    printf("free blocks = %ld\n",fs->super->free_blocks_count);
     return 0;
 }
 
@@ -333,7 +432,7 @@ int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
     assert(fs!=NULL,return -1;);
     assert(name!=NULL,return -1;);
     assert(inode_idx<fs->super->inodes_count,return -1;);
-    assert(fs->inode_table[inode_idx].type == FILE_TYPE_DIR,return -1;);
+    // assert(fs->inode_table[inode_idx].type == FILE_TYPE_DIR,return -1;);
 
     uint64_t blocks_used_num = (fs->inode_table[inode_idx].size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     uint64_t all_entry_num =  fs->inode_table[inode_idx].size / sizeof(ext2_dir_entry_t);
@@ -361,9 +460,310 @@ int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
             }
         }
     }
+    return -1;
 }
 
-int64_t ext2_create_file(const char* path)
+/**
+ * @brief 在指定目录中添加一个新的目录项
+ *
+ * 该函数用于在指定的目录中添加一个新的目录项。它会检查目录项是否已存在，如果不存在，则分配一个新的inode并将目录项写入到目录中。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param dir_inode_idx 目录的inode索引
+ * @param name 要添加的目录项名称
+ *
+ * @return 成功添加返回新目录项的inode索引，失败返回-1。
+ */
+int64_t ext2_add_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name,uint32_t type)
 {
-   
+    assert(fs!=NULL,return -1;);
+    assert(name!=NULL,return -1;);
+    assert(dir_inode_idx<fs->super->inodes_count,return -1;);
+    assert(fs->inode_table[dir_inode_idx].type == FILE_TYPE_DIR,return -1;);
+    
+    // 查找目录项是否已存在
+    int64_t existing_inode_idx = ext2_find_entry(fs, dir_inode_idx, name);
+    if(existing_inode_idx >= 0) // 如果已存在，返回错误
+    {
+        printf("Directory entry already exists.\n");
+        return -1;
+    }
+
+    // 分配一个新的目录项
+    ext2_dir_entry_t new_entry;
+    uint64_t new_inode_idx;
+    int64_t ret = ext2_alloc_inode(fs);
+    if(ret < 0) // 分配inode失败
+    {
+        printf("Failed to allocate inode.\n");
+        return ret; // 返回错误
+    }
+    new_inode_idx = (uint64_t)ret; // 获取新分配的inode索引
+
+    strncpy(new_entry.name, name, MAX_FILENAME_LEN);
+    new_entry.name[MAX_FILENAME_LEN - 1] = '\0';
+    new_entry.inode_idx =  new_inode_idx;// 分配一个新的inode
+    fs->inode_table[dir_inode_idx].ctime++; // 更新目录的创建时间
+    fs->inode_table[new_inode_idx].type = type; // 设置新inode的类型为目录
+    fs->inode_table[new_inode_idx].priv = 0; // 设置新inode的权限为0
+    fs->inode_table[new_inode_idx].size = 0; // 新
+
+    // 获取目录的inode信息
+    ext2_inode_t *dir_inode = &fs->inode_table[dir_inode_idx];
+    
+    // 计算写入后需要的块数
+    uint64_t blocks_needed = (dir_inode->size + sizeof(ext2_dir_entry_t) + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    // 确保有足够的空间
+    if(blocks_needed > 13) // 超过直接块数量，需要扩展
+    {
+        return -1; // 暂不支持超过13个直接块的情况
+    }
+
+    uint64_t append_in_which_block = dir_inode->size / BLOCK_SIZE; // 追加到第几个块
+    uint64_t append_in_which_byte = dir_inode->size % BLOCK_SIZE; // 追加到这个块的哪个字节
+
+    if(dir_inode->blk_idx[append_in_which_block] == 0) // 如果没有分配块，则分配一个新的块
+    {
+        uint64_t new_block_idx= ext2_alloc_block(fs);
+        if(new_block_idx < 0) // 分配失败                       
+        {
+            return -1; // 分配块失败
+        }
+        dir_inode->blk_idx[append_in_which_block] = new_block_idx; // 更新块索引
+    }
+
+    dir_inode->ctime++;
+    dir_inode->size += sizeof(ext2_dir_entry_t);
+    uint8_t temp_buf[BLOCK_SIZE];
+    // 读取当前块内容
+    disk_read(temp_buf, dir_inode->blk_idx[append_in_which_block]);
+    // 将新目录项写入到当前块
+    memcpy(temp_buf + append_in_which_byte, &new_entry, sizeof(ext2_dir_entry_t));
+    // 写回块
+    disk_write(temp_buf, dir_inode->blk_idx[append_in_which_block]);
+    // 更新目录的inode信息
+    
+    return new_entry.inode_idx; // 成功添加
 }
+
+int64_t ext2_get_file_size(ext2_fs_t *fs, uint64_t inode_idx)
+{
+    assert(fs!=NULL,return -1;);
+    assert(inode_idx<fs->super->inodes_count,return -1;);
+    return fs->inode_table[inode_idx].size;
+}
+
+/**
+ * @brief 将路径字符串分割成多个token
+ *
+ * 该函数用于将给定的路径字符串分割成多个token，每个token表示路径中的一个部分。
+ * 如果传入的字符串为NULL，则继续从上次分割的位置开始分割。
+ *
+ * @param str 要分割的路径字符串，如果为NULL则继续上次分割的位置
+ *
+ * @return 返回下一个token的起始位置，如果没有更多token则返回NULL。
+ */
+char* ext2_path_split(char *str,const char *delim)
+{
+    static char* cur_token = NULL; // 用于保存下一个token的起始位置 
+    static char* end = NULL; // 用于保存字符串结束位置
+    
+    if(str != NULL)
+    {
+        cur_token = str; // 保存当前token的起始位置
+        end = str;
+        // 如果str不为NULL，说明是第一次调用
+        for(int i = 0; str[i] != '\0'; i++)
+        {
+            if(str[i] == delim[0]) // 找到路径分隔符
+            {
+                str[i] = '\0'; // 将分隔符替换为字符串结束符
+            }
+            end++; // 更新end指针，直到指向字符串的末尾
+        }
+
+    }
+    else
+    {
+        // 如果str为NULL，说明是后续调用
+        while(*cur_token != '\0') //这时cur_token指向上一个token的开头，需要跳过上一段token指向下一个/0分隔符
+        {
+            if(cur_token == end) // 如果
+            {
+                cur_token = NULL;
+                break; // 如果已经到达字符串末尾，返回NULL
+            }
+            cur_token++;
+           
+        }
+    }
+
+    while(*cur_token == '\0') //这时cur_token已经不再指向上一个token的内容，但是有可能上个token结尾有多个/0分隔符，需要跳过这些分隔符指向下一个token开头
+    {
+        // 注意，一定要先判断是否到达字符串末尾，否则不会及时跳出循环，会越界报错
+        if(cur_token == end) 
+        {
+            cur_token = NULL;
+            break; // 如果已经到达字符串末尾，返回NULL
+        }
+        cur_token++;
+    }
+    
+    return cur_token; 
+}
+
+
+int64_t ext2_find_inode_by_path(ext2_fs_t *fs,const char *path,uint64_t auto_create)
+{
+    char *copy_path = strdup(path);
+    int64_t parent_inode_idx = 0;
+    int64_t child_inode_idx = 0;
+    char* token = ext2_path_split(copy_path,"/");
+    while(token) 
+    {
+        child_inode_idx = ext2_find_entry(fs, parent_inode_idx, token);
+        if(child_inode_idx < 0) // 如果没有找到父目录,那就建立对应目录
+        {
+            if(auto_create == 0) // 如果不允许自动创建目录
+            {
+                printf("Directory %s not found.\n", token);
+                free(copy_path); // 释放复制的路径字符串
+                return -1; // 返回错误
+            }
+            else
+            {
+                child_inode_idx = ext2_add_entry(fs, parent_inode_idx, token, FILE_TYPE_DIR); // 在父目录下添加新的子目录
+                if(child_inode_idx < 0) // 如果添加目录失败
+                {
+                    return -1; // 返回错误
+                }
+            }
+           
+        }
+        parent_inode_idx = child_inode_idx; // 更新父目录的inode索引
+        token = ext2_path_split(NULL,"/");
+    }
+    free(copy_path); // 释放复制的路径字符串
+    return parent_inode_idx; // 返回最后找到的inode索引
+}
+
+char* ext2_get_filename(char *path)
+{
+    const char *filename = strrchr(path, '/');
+    if (filename)
+    {
+        filename++;  // 跳过 '/'
+    } 
+    else 
+    {
+        filename = path;  // 没有 '/'，说明 path 就是文件名
+    }
+    return filename;
+}
+
+int64_t ext2_create_dir_by_path(ext2_fs_t *fs, const char *path)
+{
+    assert(fs!=NULL&&path!=NULL,return -1;);
+
+    if(strcmp(path, "/") == 0) // 如果路径是根目录
+    {
+        return 0; // 根目录不需要创建
+    }
+    
+    if(ext2_find_inode_by_path(fs, path, 1)<0) // 查找路径对应的inode，如果不存在则创建
+    {
+        printf("Failed to create directory: %s\n", path);
+        return -1; // 返回错误
+    }
+    printf("Directory created successfully: %s\n", path);
+    return 0; // 成功创建目录
+}
+
+
+int64_t ext2_create_file_by_path(ext2_fs_t *fs, const char *path)
+{
+    assert(fs!=NULL&&path!=NULL,return -1;);
+    char *copy_path = strdup(path); // 复制路径字符串，避免修改原始字符串
+    if(strcmp(path, "/") == 0) // 如果路径是根目录
+    {
+        return 0; // 根目录
+    }
+
+    char* token = NULL;
+    char* file_name = ext2_get_filename(copy_path);
+    int64_t parent_inode_idx = 0;
+    int64_t child_inode_idx = 0;
+    
+    token = ext2_path_split(copy_path,"/");
+    while(token != file_name) 
+    {
+        child_inode_idx = ext2_find_entry(fs, parent_inode_idx, token);
+        if(child_inode_idx < 0) // 如果没有找到父目录
+        {
+                printf("Failed to create directory: %s\n", token);
+                return -1; // 返回错误
+        }
+        parent_inode_idx = child_inode_idx; // 更新父目录的inode索引
+        token = ext2_path_split(NULL,"/");
+    }
+    child_inode_idx = ext2_add_entry(fs, parent_inode_idx, token, FILE_TYPE_FILE);
+    if(child_inode_idx < 0) // 如果添加文件失败
+    {
+        printf("Failed to create file: %s\n", file_name);
+        return -1; // 返回错误
+    }
+    printf("File created successfully: %s\n", path);
+    free(copy_path); // 释放复制的路径字符串
+    return 0; // 返回新创建文件的inode索引
+}
+
+int64_t ext2_write_file_by_path(ext2_fs_t *fs, const char *path, const void *data, uint64_t size)
+{
+    assert(fs!=NULL&&path!=NULL&&data!=NULL,return -1;);
+    int64_t inode_idx = ext2_find_inode_by_path(fs, path, 0); // 查找路径对应的inode
+    if(inode_idx<0)
+    {
+        printf("Failed to find for file: %s\n", path);
+        return -1; // 返回错误
+    }
+
+    if(ext2_append_file(fs, inode_idx, data, size)<0) // 如果追加文件失败
+    {
+        printf("Failed to write file: %s\n", path);
+        return -1; // 返回错误
+    }
+    printf("File written successfully: %s\n", path);
+    return 0;
+}
+
+int64_t ext2_append_file_by_path(ext2_fs_t *fs, const char *path, const void *data, uint64_t size)
+{
+
+}
+
+int64_t ext2_read_file_by_path(ext2_fs_t *fs, const char *path, void *buf)
+{
+    assert(fs!=NULL&&path!=NULL,return -1;);
+    int64_t inode_idx = ext2_find_inode_by_path(fs, path, 0); // 查找路径对应的inode
+    if(inode_idx<0)
+    {
+        printf("Failed to find or create directory for file: %s\n", path);
+        return -1; // 返回错误
+    }
+
+    if(ext2_read_file(fs, inode_idx, buf)<0) // 如果读取文件失败
+    {
+        printf("Failed to read file: %s\n", path);
+     
+        return -1; // 返回错误
+    }
+    printf("File read successfully: %s\n", path);
+    return 0;
+}
+
+int64_t ext2_get_file_size_by_path(ext2_fs_t *fs, const char *path)
+{
+
+}
+
