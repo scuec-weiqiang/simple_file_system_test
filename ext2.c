@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-05-31 15:28:54
- * @LastEditTime: 2025-06-24 00:44:04
+ * @LastEditTime: 2025-06-25 01:38:00
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -30,7 +30,6 @@ char *strdup(const char *s) {
 }
 
 #define EXT2_INODE_DENSITY_PER_GIB 2048
-
 
 typedef struct ext2_super_block {
 #define EXT2_SUPER_MAGIC 0xEF53
@@ -88,7 +87,9 @@ typedef struct ext2_fs
     bitmap_t *block_bitmap; 
     bitmap_t *inode_bitmap; 
     ext2_inode_t *inode_table; 
+    uint64_t cwd_inode_idx; // 当前工作目录的inode索引
 }ext2_fs_t;
+
 
 /**
  * @brief 创建一个ext2文件系统
@@ -122,9 +123,11 @@ ext2_fs_t* ext2_fs_create()
     fs->inode_bitmap = bitmap_create(fs->super->inodes_count);
     // 分配 inode 表内存
     fs->inode_table = (ext2_inode_t *)malloc(sizeof(ext2_inode_t) * fs->super->inodes_count);
-
+    // 初始化当前工作目录为根目录
+    fs->cwd_inode_idx = ROOT_INODE_IDX; 
     return fs;
 }
+
 
 /**
  * @brief 格式化 ext2 文件系统
@@ -220,7 +223,8 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
     fs->inode_table[ROOT_INODE_IDX].size = 0; // 初始大小为0
     fs->inode_table[ROOT_INODE_IDX].ctime = 1; // 创建时间设为1
     // fs->inode_table[ROOT_INODE_IDX].blk_idx[0] = ext2_alloc_block(fs); // 分配一个数据块给根目录
-   
+    printf("free inode num = %ld\n", fs->super->free_inodes_count);
+    printf("free block num = %ld\n\n", fs->super->free_blocks_count);
     // 统一写入
     DISK_WRITE(fs->super,super_block_pos_start,super_block_num);
     DISK_WRITE(fs->group,group_block_pos_start,group_block_num);
@@ -230,6 +234,7 @@ int64_t ext2_fs_format(ext2_fs_t *fs)
 
     return 0;
 }
+
 
 /*
 * @brief 加载 ext2 文件系统
@@ -256,6 +261,16 @@ int64_t ext2_fs_load(ext2_fs_t *fs)
 
 }
 
+
+/**
+ * @brief 分配一个新的块
+ *
+ * 该函数用于分配一个新的块，并更新文件系统的空闲块计数。
+ *
+ * @param fs 指向ext2文件系统的指针
+ *
+ * @return 成功返回新分配的块索引，失败返回-1。
+ */
 int64_t ext2_alloc_block(ext2_fs_t *fs)
 {
     assert(fs!=NULL,return -1;);
@@ -275,6 +290,17 @@ int64_t ext2_alloc_block(ext2_fs_t *fs)
 
 }
 
+
+/**
+ * @brief 释放指定的块
+ *
+ * 该函数用于释放指定的块，并更新文件系统的空闲块计数。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param idx 要释放的块索引
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_free_block(ext2_fs_t *fs,uint64_t idx)
 {
     assert(fs!=NULL,return -1;);
@@ -287,6 +313,16 @@ int64_t ext2_free_block(ext2_fs_t *fs,uint64_t idx)
     return ret;
 }
 
+
+/**
+ * @brief 分配一个新的inode
+ *
+ * 该函数用于分配一个新的inode，并更新文件系统的空闲inode计数。
+ *
+ * @param fs 指向ext2文件系统的指针
+ *
+ * @return 成功返回新分配的inode索引，失败返回-1。
+ */
 int64_t ext2_alloc_inode(ext2_fs_t *fs)
 {
     assert(fs!=NULL,return -1;);
@@ -305,6 +341,17 @@ int64_t ext2_alloc_inode(ext2_fs_t *fs)
 
 }
 
+
+/**
+ * @brief 释放指定的inode
+ *
+ * 该函数用于释放指定的inode，并更新文件系统的空闲inode计数。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param idx 要释放的inode索引
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_free_inode(ext2_fs_t *fs,uint64_t idx)
 {
     assert(fs!=NULL,return -1;);
@@ -318,7 +365,18 @@ int64_t ext2_free_inode(ext2_fs_t *fs,uint64_t idx)
 }
 
 
-
+/**
+ * @brief 覆盖写数据到指定inode的文件
+ *
+ * 该函数用于将数据覆盖写到指定inode的文件中，并更新inode的大小和修改时间。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param inode_idx 要覆盖写数据的inode索引
+ * @param data 要覆盖写的数据
+ * @param size 要覆盖写的数据大小
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_overwrite_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uint64_t size)
 {
     assert(fs!=NULL,return -1;);
@@ -360,6 +418,19 @@ int64_t ext2_overwrite_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data,
 
 }
 
+
+/**
+ * @brief 追加数据到指定inode的文件
+ *
+ * 该函数用于将数据追加到指定inode的文件中，并更新inode的大小和修改时间。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param inode_idx 要追加数据的inode索引
+ * @param data 要追加的数据
+ * @param size 要追加的数据大小
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_append_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, uint64_t size)
 {
     assert(fs!=NULL,return -1;);
@@ -403,6 +474,18 @@ int64_t ext2_append_file(ext2_fs_t *fs, uint64_t inode_idx, const void *data, ui
 
 }
 
+
+/**
+ * @brief 读取指定inode的文件内容
+ *
+ * 该函数用于从指定inode中读取文件内容，并将其存储到buf中。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param inode_idx 要读取的inode索引
+ * @param buf 用于存储读取的文件内容的缓冲区
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_read_file(ext2_fs_t *fs, uint64_t inode_idx, void *buf)
 {
     assert(fs!=NULL,return -1;);
@@ -418,22 +501,22 @@ int64_t ext2_read_file(ext2_fs_t *fs, uint64_t inode_idx, void *buf)
     return 0;
 }
 
-/* * @brief 删除指定的文件
+
+/**
+ * @brief 删除指定inode的文件或目录
  *
- * 该函数用于删除指定的文件。它会释放对应的inode和块，并清空inode信息。
+ * 该函数用于删除指定inode的文件或目录，包括释放其占用的块和inode，并清空inode信息。
  *
  * @param fs 指向ext2文件系统的指针
- * @param inode_idx 要删除的文件的inode索引
+ * @param inode_idx 要删除的inode索引
  *
  * @return 成功返回0，失败返回-1。
  */
-int64_t ext2_delete_file(ext2_fs_t *fs, uint64_t inode_idx)
+int64_t ext2_delete_inode_data(ext2_fs_t *fs, uint64_t inode_idx)
 {
     assert(fs!=NULL,return -1;);
     assert(inode_idx<fs->super->inodes_count,return -1;);
 
-    // 释放inode
-    ext2_free_inode(fs,inode_idx);
     // 释放块
     for(uint64_t i = 0;i<13;i++)
     {
@@ -442,28 +525,30 @@ int64_t ext2_delete_file(ext2_fs_t *fs, uint64_t inode_idx)
             ext2_free_block(fs,fs->inode_table[inode_idx].blk_idx[i]);
         }
     }
-    
+    // 释放inode
+    ext2_free_inode(fs,inode_idx);
     // 清空inode信息
     memset(&fs->inode_table[inode_idx], 0, sizeof(ext2_inode_t));
     
     DISK_WRITE(fs->inode_table, fs->group->inode_table_start_idx, fs->group->inode_table_block_num);
     
-    return 0;
+    return SUCCESS;
 }
 
 
 /**
- * @brief 在目录中查找文件或子目录
+ * @brief 获取指定目录下的目录项
  *
- * 在指定的ext2文件系统中，查找指定目录下的文件名对应的inode索引。
+ * 该函数用于在指定的ext2文件系统中查找指定目录下的目录项，并将其信息存储在entry_ret中。
  *
  * @param fs 指向ext2文件系统的指针
- * @param dir_inode_idx 目录的inode索引
+ * @param inode_idx 目录的inode索引
  * @param name 要查找的文件名
+ * @param entry_ret 用于存储找到的目录项信息
  *
- * @return 如果找到匹配的文件名，则返回对应的inode索引；否则返回-1。
+ * @return 成功返回0，未找到返回-1。
  */
-int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
+int64_t ext2_get_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name, ext2_dir_entry_t *entry_ret)
 {
     assert(fs!=NULL,return ERROR_INVALID_ARG;);
     assert(name!=NULL,return ERROR_INVALID_ARG;);
@@ -492,7 +577,8 @@ int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
             // 检查文件名是否匹配
             if (strcmp(entry.name, name) == 0)
             {
-                return entry.inode_idx; // 返回匹配的inode索引
+                *entry_ret = entry; // 将找到的目录项复制到输出参数
+                return SUCCESS; 
             }
         }
     }
@@ -500,6 +586,54 @@ int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
 }
 
 
+/**
+ * @brief 在目录中查找文件或子目录
+ *
+ * 在指定的ext2文件系统中，查找指定目录下的文件名对应的inode索引。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param dir_inode_idx 目录的inode索引
+ * @param name 要查找的文件名
+ *
+ * @return 如果找到匹配的文件名，则返回对应的inode索引；否则返回-1。
+ */
+int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
+{
+    assert(fs!=NULL,return ERROR_INVALID_ARG;);
+    assert(name!=NULL,return ERROR_INVALID_ARG;);
+    assert(inode_idx<fs->super->inodes_count,return ERROR_INVALID_ARG;);
+    // assert(fs->inode_table[inode_idx].type == FILE_TYPE_DIR,return -1;);
+
+    ext2_dir_entry_t entry;
+    int64_t ret = ext2_get_entry(fs, inode_idx, name, &entry);
+    if(ret == SUCCESS) // 如果找到了目录项
+    {
+        return entry.inode_idx; // 返回对应的inode索引
+    }
+    else
+    {
+        // printf("Directory entry '%s' not found in inode %lu.\n", name, inode_idx);
+        return ERROR_NOT_FOUND;
+    }
+    // 如果没有找到目录项
+
+    
+}
+
+
+/**
+ * @brief 初始化一个新的目录项
+ *
+ * 该函数用于初始化一个新的目录项，包括设置名称、inode索引和类型。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param new_entry 指向要初始化的目录项结构体
+ * @param inode_idx 新目录项对应的inode索引
+ * @param name 新目录项的名称
+ * @param type 新目录项的类型（文件或目录）
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 static int64_t ext2_init_entry(ext2_fs_t *fs, ext2_dir_entry_t *new_entry, uint64_t inode_idx, const char *name, uint32_t type)
 {
     strncpy(new_entry->name, name, MAX_FILENAME_LEN);
@@ -510,6 +644,7 @@ static int64_t ext2_init_entry(ext2_fs_t *fs, ext2_dir_entry_t *new_entry, uint6
     fs->inode_table[inode_idx].size = 0; 
     return SUCCESS;
 }
+
 
 /**
  * @brief 在指定目录中添加一个新的目录项
@@ -588,6 +723,7 @@ int64_t ext2_add_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name,u
     return FAILED;
 }
 
+
 /**
  * @brief 删除指定目录中的目录项
  *
@@ -606,17 +742,34 @@ int64_t ext2_remove_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *nam
     assert(dir_inode_idx<fs->super->inodes_count,return -1;);
     assert(fs->inode_table[dir_inode_idx].type == FILE_TYPE_DIR,return -1;);
 
-    // 查找目录项
-    int64_t entry_inode_idx = ext2_find_entry(fs, dir_inode_idx, name);
-    if(entry_inode_idx < 0) // 如果没有找到目录项
+    ext2_dir_entry_t entry;
+    // 获取要删除的entry信息
+    int64_t ret = ext2_get_entry(fs, dir_inode_idx, name, &entry);
+    if(ret != SUCCESS) // 如果获取目录项失败
     {
-        printf("Directory entry not found.\n");
-        return entry_inode_idx; // 返回错误
+        printf("Failed to get directory entry.\n");
+        return ret; // 返回错误
     }
-
-    // 删除目录项
-    ext2_free_inode(fs, entry_inode_idx); // 释放inode
-    fs->inode_table[entry_inode_idx].type = 0; // 清空inode类型
+    // 检查要删除的entry是否是目录
+    if (fs->inode_table[entry.inode_idx].type == FILE_TYPE_DIR) 
+    {
+        if(entry.inode_idx == ROOT_INODE_IDX) // 如果是根目录
+        {
+            printf("Cannot remove root directory.\n");
+            return -1; // 返回错误
+        }
+        if(fs->inode_table[entry.inode_idx].size > 0)
+        {
+            // 不能删除非空目录
+            printf("Cannot remove non-empty directory.\n");
+            return -1; // 返回错误
+        }
+    }
+    
+    ext2_delete_inode_data(fs, entry.inode_idx); // 删除inode数据
+    
+    entry.name[0] = '\0'; // 清空名称
+    entry.inode_idx = 0; // 清空inode索引
 
     // 更新目录的创建时间和大小
     fs->inode_table[dir_inode_idx].ctime++;
@@ -626,12 +779,25 @@ int64_t ext2_remove_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *nam
     
     return 0; // 成功删除
 }
-int64_t ext2_get_file_size(ext2_fs_t *fs, uint64_t inode_idx)
+
+
+/**
+ * @brief 获取指定inode的大小
+ *
+ * 该函数用于获取指定inode的大小（以字节为单位）。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param inode_idx 要获取大小的inode索引
+ *
+ * @return 返回inode的大小，如果发生错误则返回-1。
+ */
+int64_t ext2_get_inode_size(ext2_fs_t *fs, uint64_t inode_idx)
 {
     assert(fs!=NULL,return -1;);
     assert(inode_idx<fs->super->inodes_count,return -1;);
     return fs->inode_table[inode_idx].size;
 }
+
 
 /**
  * @brief 将路径字符串分割成多个token
@@ -692,7 +858,18 @@ char* ext2_path_split(char *str,const char *delim)
     return cur_token; 
 }
 
- 
+
+/**
+ * @brief 根据路径查找或创建对应的inode
+ *
+ * 该函数用于根据给定的路径查找对应的inode，如果不存在则根据auto_create参数决定是否自动创建目录。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要查找的路径字符串
+ * @param auto_create 是否允许自动创建目录（0表示不允许，1表示允许）
+ *
+ * @return 返回找到的inode索引，如果没有找到且不允许自动创建则返回-1。
+ */
 static int64_t ext2_find_inode_by_path(ext2_fs_t *fs,const char *path,uint64_t auto_create)
 {
     char *copy_path = strdup(path);
@@ -727,20 +904,108 @@ static int64_t ext2_find_inode_by_path(ext2_fs_t *fs,const char *path,uint64_t a
     return parent_inode_idx; // 返回最后找到的inode索引
 }
 
-char* ext2_get_filename(char *path)
+
+/**
+ * @brief 获取路径的基本名称
+ *
+ * 该函数用于从给定的路径字符串中提取基本名称（即最后一个斜杠后的部分）。
+ *
+ * @param path 要处理的路径字符串
+ *
+ * @return 返回指向基本名称的指针，如果路径中没有斜杠，则返回整个路径字符串。
+ */
+int64_t ext2_get_path_basename (char *path,char* basename)
 {
-    const char *filename = strrchr(path, '/');
-    if (filename)
+    if (!path || !*path) return FAILED;
+
+    size_t len = strlen(path);
+    if(len> MAX_FILENAME_LEN-1) 
     {
-        filename++;  // 跳过 '/'
-    } 
-    else 
-    {
-        filename = path;  // 没有 '/'，说明 path 就是文件名
+        printf("Path length exceeds maximum allowed length.\n");
+        return FAILED; // 路径长度超过最大限制
     }
-    return filename;
+    uint64_t basename_head = 0;
+    uint64_t basename_tail = len;
+
+    // 去掉尾部的 '/'（如果有）
+    while (basename_tail > 1 && path[basename_tail - 1] == '/') 
+    {
+        basename_tail--;
+    }
+    // 向前查找最后一个 '/'
+    for (int64_t i = basename_tail - 1; i >= 0; i--)
+    {
+        if (path[i] == '/') 
+        {
+            basename_head = i + 1;
+            break;
+        }
+    }
+    
+    strncpy(basename, path + basename_head, basename_tail - basename_head);
+    basename[basename_tail - basename_head] = '\0';
+
+    return SUCCESS; 
+    
 }
 
+
+/**
+ * @brief 获取路径的目录名
+ *
+ * 该函数用于从给定的路径字符串中提取目录名（即最后一个斜杠之前的部分）。
+ *
+ * @param path 要处理的路径字符串
+ * @param dirname 用于存储目录名的缓冲区
+ *
+ * @return 返回0表示成功，-1表示失败。
+ */
+int64_t ext2_get_path_dirname (char *path,char* dirname)
+{
+    if (!path || !*path) return FAILED;
+
+    size_t len = strlen(path);
+    if(len> MAX_FILENAME_LEN-1) 
+    {
+        printf("Path length exceeds maximum allowed length.\n");
+        return FAILED; // 路径长度超过最大限制
+    }
+
+    uint64_t dirname_tail = len;
+
+    // 去掉尾部的 '/'（如果有）
+    while (dirname_tail > 1 && path[dirname_tail - 1] == '/') 
+    {
+        dirname_tail--;
+    }
+    // 向前查找最后一个 '/'
+    for (int64_t i = dirname_tail - 1; i >= 0; i--)
+    {
+        if (path[i] == '/') 
+        {
+            dirname_tail = i + 1;
+            break;
+        }
+    }
+    
+    strncpy(dirname, path, dirname_tail);
+    dirname[dirname_tail] = '\0';
+
+    return SUCCESS; 
+    
+}
+
+/**
+ * @brief 根据路径创建目录
+ *
+ * 该函数用于根据给定的路径创建一个新的目录。如果路径是根目录，则不需要创建。
+ * 如果路径不存在，则会自动创建对应的目录。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要创建的目录路径
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_create_dir_by_path(ext2_fs_t *fs, const char *path)
 {
     assert(fs!=NULL&&path!=NULL,return -1;);
@@ -756,51 +1021,98 @@ int64_t ext2_create_dir_by_path(ext2_fs_t *fs, const char *path)
         return -1; // 返回错误
     }
     printf("Directory created successfully: %s\n", path);
+
     return 0; // 成功创建目录
 }
 
+
+/**
+ * @brief 根据路径创建文件
+ *
+ * 该函数用于根据给定的路径创建一个新的文件。如果路径对应的目录不存在，则会自动创建目录。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要创建的文件路径
+ *
+ * @return 成功返回新创建文件的inode索引，失败返回-1。
+ */
 int64_t ext2_create_file_by_path(ext2_fs_t *fs, const char *path)
 {
     assert(fs!=NULL&&path!=NULL,return -1;);
-    char *copy_path = strdup(path); // 复制路径字符串，避免修改原始字符串
-    if(strcmp(path, "/") == 0) // 如果路径是根目录
-    {
-        return 0; // 根目录
-    }
 
-    char* token = NULL;
-    char* file_name = ext2_get_filename(copy_path);
-    int64_t parent_inode_idx = 0;
-    int64_t child_inode_idx = 0;
-    
-    token = ext2_path_split(copy_path,"/");
-    while(token != file_name) 
+    char base_name[MAX_FILENAME_LEN]; 
+    ext2_get_path_basename (path, base_name);
+    char dir_name[MAX_FILENAME_LEN]; 
+    ext2_get_path_dirname (path, dir_name);
+
+    int64_t dir_inode_idx = ext2_find_inode_by_path(fs, dir_name, 0); // 查找路径对应的inode
+    if( dir_inode_idx < 0)
     {
-        child_inode_idx = ext2_find_entry(fs, parent_inode_idx, token);
-        if(child_inode_idx < 0) // 如果没有找到父目录
-        {
-                printf("Failed to create directory: %s\n", token);
-                return -1; // 返回错误
-        }
-        parent_inode_idx = child_inode_idx; // 更新父目录的inode索引
-        token = ext2_path_split(NULL,"/");
-    }
-    child_inode_idx = ext2_add_entry(fs, parent_inode_idx, token, FILE_TYPE_FILE);
-    if(child_inode_idx < 0) // 如果添加文件失败
-    {
-        printf("Failed to create file: %s\n", file_name);
+        printf("Failed to find for file: %s\n", path);
         return -1; // 返回错误
     }
+    int64_t file_inode_idx = ext2_add_entry(fs,  dir_inode_idx, base_name, FILE_TYPE_FILE);
+    if(file_inode_idx < 0) // 如果添加文件失败
+    {
+        printf("Failed to create file: %s\n", base_name);
+        return -1; // 返回错误
+    }
+
     printf("File created successfully: %s\n", path);
-    free(copy_path); // 释放复制的路径字符串
-    return 0; // 返回新创建文件的inode索引
+
+    return file_inode_idx; // 返回新创建文件的inode索引
 }
 
-int64_t ext2_delete_file_by_path(ext2_fs_t *fs, const char *path)
+
+/**
+ * @brief 根据路径删除文件
+ *
+ * 该函数用于根据给定的路径删除一个文件。如果文件不存在，则返回错误。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要删除的文件路径
+ *
+ * @return 成功返回0，失败返回-1。
+ */
+int64_t ext2_unlink_by_path(ext2_fs_t *fs, const char *path)
 {
-    
+    assert(fs!=NULL&&path!=NULL,return -1;);
+    char base_name[MAX_FILENAME_LEN]; 
+    ext2_get_path_basename (path, base_name);
+    char dir_name[MAX_FILENAME_LEN]; 
+    ext2_get_path_dirname (path, dir_name);
+
+    int64_t dir_inode_idx = ext2_find_inode_by_path(fs, dir_name, 0); // 查找路径对应的inode
+    if( dir_inode_idx < 0)
+    {
+        printf("Failed to find for file: %s\n", path);
+        return -1; // 返回错误
+    }
+    int64_t ret = ext2_remove_entry(fs, (uint64_t)dir_inode_idx, base_name);
+    if(ret < 0) // 如果添加文件失败
+    {
+        printf("Failed to delete file: %s\n", base_name);
+        return ret; // 返回错误
+    }
+
+    printf("File deleted successfully: %s\n", path);
+ 
+    return SUCCESS; // 成功删除文件
 }
 
+
+/**
+ * @brief 追加数据到指定路径的文件
+ *
+ * 该函数用于将数据追加到指定路径的文件中。如果文件不存在，则返回错误。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要追加数据的文件路径
+ * @param data 要追加的数据
+ * @param size 要追加的数据大小
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_append_file_by_path(ext2_fs_t *fs, const char *path, const void *data, uint64_t size)
 {
     assert(fs!=NULL&&path!=NULL&&data!=NULL,return -1;);
@@ -817,9 +1129,23 @@ int64_t ext2_append_file_by_path(ext2_fs_t *fs, const char *path, const void *da
         return -1; // 返回错误
     }
     printf("File written successfully: %s\n", path);
+    
     return 0;
 }
 
+
+/**
+ * @brief 覆盖写数据到指定路径的文件
+ *
+ * 该函数用于将数据覆盖写到指定路径的文件中。如果文件不存在，则返回错误。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要覆盖写数据的文件路径
+ * @param data 要覆盖写的数据
+ * @param size 要覆盖写的数据大小
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_overwrite_file_by_path(ext2_fs_t *fs, const char *path, const void *data, uint64_t size)
 {
     assert(fs!=NULL&&path!=NULL&&data!=NULL,return -1;);
@@ -839,6 +1165,18 @@ int64_t ext2_overwrite_file_by_path(ext2_fs_t *fs, const char *path, const void 
     return 0;
 }
 
+
+/**
+ * @brief 根据路径读取文件内容
+ *
+ * 该函数用于根据给定的路径读取文件内容，并将其存储到buf中。如果文件不存在，则返回错误。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要读取的文件路径
+ * @param buf 用于存储读取的文件内容的缓冲区
+ *
+ * @return 成功返回0，失败返回-1。
+ */
 int64_t ext2_read_file_by_path(ext2_fs_t *fs, const char *path, void *buf)
 {
     assert(fs!=NULL&&path!=NULL,return -1;);
@@ -859,7 +1197,18 @@ int64_t ext2_read_file_by_path(ext2_fs_t *fs, const char *path, void *buf)
     return 0;
 }
 
-int64_t ext2_get_file_size_by_path(ext2_fs_t *fs, const char *path)
+
+/**
+ * @brief 根据路径获取文件的大小
+ *
+ * 该函数用于根据给定的路径获取对应文件的大小（以字节为单位）。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param path 要获取大小的文件或目录路径
+ *
+ * @return 返回文件的大小，如果发生错误则返回-1。
+ */
+int64_t ext2_get_inode_size_by_path(ext2_fs_t *fs, const char *path)
 {
 
 }

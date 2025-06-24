@@ -3,7 +3,7 @@
  * @Description:  
  * @Author: scuec_weiqiang scuec_weiqiang@qq.com
  * @Date: 2025-06-01 15:43:40
- * @LastEditTime: 2025-06-23 23:46:30
+ * @LastEditTime: 2025-06-25 01:35:57
  * @LastEditors: scuec_weiqiang scuec_weiqiang@qq.com
  * @Copyright    : G AUTOMOBILE RESEARCH INSTITUTE CO.,LTD Copyright (c) 2025.
 */
@@ -36,12 +36,35 @@ int main()
     ext2_create_dir_by_path(fs, "/a/b/");
     ext2_create_file_by_path(fs, "/a/b/testfile.txt");
     ext2_append_file_by_path(fs, "/a/b/testfile.txt", long_data, BLOCK_SIZE * BLOCK_COUNT);
-    ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    printf("read file /a/b/testfile.txt:\n%s\n",read);
+    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
+    // printf("read file /a/b/testfile.txt:\n%s\n",read);
 
-    ext2_overwrite_file_by_path(fs, "/a/b/testfile.txt", "long_data", 10);
-    ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    printf("read file /a/b/testfile.txt:\n%s\n",read);
+    ext2_unlink_by_path(fs, "/a/b/testfile.txt");
+    ext2_unlink_by_path(fs, "/a/b");
+    ext2_unlink_by_path(fs, "/a");
+
+
+    ext2_create_dir_by_path(fs, "/a/b/");
+    ext2_create_file_by_path(fs, "/a/b/testfile.txt");
+    ext2_append_file_by_path(fs, "/a/b/testfile.txt", long_data, BLOCK_SIZE * BLOCK_COUNT);
+    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
+    // printf("read file /a/b/testfile.txt:\n%s\n",read);
+
+    ext2_unlink_by_path(fs, "/a/b/testfile.txt");
+    ext2_unlink_by_path(fs, "/a/b");
+    ext2_unlink_by_path(fs, "/a");
+    
+    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
+    // printf("read file /a/b/testfile.txt:\n%s\n",read);
+
+    // ext2_create_file_by_path(fs, "/a/b/testfile.txt");
+    // ext2_append_file_by_path(fs, "/a/b/testfile.txt", "123456789", 10);
+    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
+    // printf("read file /a/b/testfile.txt:\n%s\n",read);
+
+    // ext2_delete_file_by_path(fs, "/a/b/testfile.txt");
+    // ext2_delete_file_by_path(fs, "/a/b/");
+    // ext2_delete_file_by_path(fs, "/a");
 
 
     return 0;
