@@ -70,8 +70,8 @@ typedef struct ext2_inode {
     uint32_t priv;        // 权限
     uint64_t size;        // 文件大小(字节)
     uint64_t ctime;       // 创建时间
-#define MAX_BLK_IDX 13
-    uint64_t blk_idx[MAX_BLK_IDX];  // 所在块号
+#define MAX_BLK_NUM 13
+    uint64_t blk_idx[MAX_BLK_NUM];  // 所在块号
 }ext2_inode_t;
 
 
@@ -499,10 +499,22 @@ int64_t ext2_find_entry(ext2_fs_t *fs, uint64_t inode_idx, const char *name)
     return ERROR_NOT_FOUND;
 }
 
+
+static int64_t ext2_init_entry(ext2_fs_t *fs, ext2_dir_entry_t *new_entry, uint64_t inode_idx, const char *name, uint32_t type)
+{
+    strncpy(new_entry->name, name, MAX_FILENAME_LEN);
+    new_entry->name[MAX_FILENAME_LEN - 1] = '\0';
+    new_entry->inode_idx =  inode_idx;// 分配一个新的inode
+    fs->inode_table[inode_idx].type = type; // 设置新inode的类型
+    fs->inode_table[inode_idx].priv = 0; // 设置新inode的权限为0
+    fs->inode_table[inode_idx].size = 0; 
+    return SUCCESS;
+}
+
 /**
  * @brief 在指定目录中添加一个新的目录项
  *
- * 该函数用于在指定的目录中添加一个新的目录项。它会检查目录项是否已存在，如果不存在，则分配一个新的inode并将目录项写入到目录中。
+ * 该函数用于在指定的目录中添加一个新的目录项，但是不会检查目录项是否重复
  *
  * @param fs 指向ext2文件系统的指针
  * @param dir_inode_idx 目录的inode索引
@@ -517,33 +529,6 @@ int64_t ext2_add_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name,u
     assert(dir_inode_idx<fs->super->inodes_count,return -1;);
     assert(fs->inode_table[dir_inode_idx].type == FILE_TYPE_DIR,return -1;);
     
-    // 查找目录项是否已存在
-    int64_t existing_inode_idx = ext2_find_entry(fs, dir_inode_idx, name);
-    if(existing_inode_idx >= 0) // 如果已存在，返回错误
-    {
-        printf("Directory entry already exists.\n");
-        return ERROR_DUPLICATE;
-    }
-
-    // 分配一个新的目录项
-    ext2_dir_entry_t new_entry;
-    uint64_t new_inode_idx;
-    int64_t ret = ext2_alloc_inode(fs);
-    if(ret < 0) // 分配inode失败
-    {
-        printf("Failed to allocate inode.\n");
-        return ret; // 返回错误
-    }
-    new_inode_idx = (uint64_t)ret; // 获取新分配的inode索引
-
-    strncpy(new_entry.name, name, MAX_FILENAME_LEN);
-    new_entry.name[MAX_FILENAME_LEN - 1] = '\0';
-    new_entry.inode_idx =  new_inode_idx;// 分配一个新的inode
-    fs->inode_table[dir_inode_idx].ctime++; // 更新目录的创建时间
-    fs->inode_table[new_inode_idx].type = type; // 设置新inode的类型为目录
-    fs->inode_table[new_inode_idx].priv = 0; // 设置新inode的权限为0
-    fs->inode_table[new_inode_idx].size = 0; // 新
-
     // 获取目录的inode信息
     ext2_inode_t *dir_inode = &fs->inode_table[dir_inode_idx];
     
@@ -556,31 +541,51 @@ int64_t ext2_add_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name,u
         return -1; // 暂不支持超过13个直接块的情况
     }
 
-    uint64_t append_in_which_block = dir_inode->size / BLOCK_SIZE; // 追加到第几个块
-    uint64_t append_in_which_byte = dir_inode->size % BLOCK_SIZE; // 追加到这个块的哪个字节
-
-    if(dir_inode->blk_idx[append_in_which_block] == 0) // 如果没有分配块，则分配一个新的块
+    //遍历目录中所有的块，找到空位
+    for(uint64_t i=0;i<MAX_BLK_NUM;i++)
     {
-        uint64_t new_block_idx= ext2_alloc_block(fs);
-        if(new_block_idx < 0) // 分配失败                       
+        if(dir_inode->blk_idx[i] == 0) // 如果没有分配块，则分配一个新的块
         {
-            return -1; // 分配块失败
+            int64_t new_block_idx_ret = ext2_alloc_block(fs);
+            if(new_block_idx_ret < 0) // 分配失败                       
+            {
+                return -1; // 分配块失败
+            }
+            dir_inode->blk_idx[i] = (uint64_t)new_block_idx_ret; // 更新块索引
         }
-        dir_inode->blk_idx[append_in_which_block] = new_block_idx; // 更新块索引
-    }
 
-    dir_inode->ctime++;
-    dir_inode->size += sizeof(ext2_dir_entry_t);
-    uint8_t temp_buf[BLOCK_SIZE];
-    // 读取当前块内容
-    disk_read(temp_buf, dir_inode->blk_idx[append_in_which_block]);
-    // 将新目录项写入到当前块
-    memcpy(temp_buf + append_in_which_byte, &new_entry, sizeof(ext2_dir_entry_t));
-    // 写回块
-    disk_write(temp_buf, dir_inode->blk_idx[append_in_which_block]);
-    // 更新目录的inode信息
-    DISK_WRITE(fs->inode_table, fs->group->inode_table_start_idx, fs->group->inode_table_block_num);
-    return new_entry.inode_idx; // 成功添加
+        ext2_dir_entry_t buffer[BLOCK_SIZE/sizeof(ext2_dir_entry_t)];
+        for(uint64_t j=0;j<BLOCK_SIZE/sizeof(ext2_dir_entry_t);j++)
+        {
+            disk_read((uint8_t*)buffer,dir_inode->blk_idx[i]);
+            if(buffer[j].inode_idx==0)//找到可用的位置
+            {
+                // 分配一个新的目录项
+                ext2_dir_entry_t new_entry;
+                uint64_t new_inode_idx;
+                int64_t ret = ext2_alloc_inode(fs);
+                if(ret < 0) // 分配inode失败
+                {
+                    printf("Failed to allocate inode.\n");
+                    return ret; // 返回错误
+                }
+                new_inode_idx = (uint64_t)ret; // 获取新分配的inode索引
+                ext2_init_entry(fs, &new_entry, new_inode_idx, name, type);
+
+                
+                buffer[j] = new_entry;
+                disk_write((uint8_t*)buffer,dir_inode->blk_idx[i]);
+                
+                dir_inode->ctime++;
+                dir_inode->size += sizeof(ext2_dir_entry_t);
+                DISK_WRITE(fs->inode_table, fs->group->inode_table_start_idx, fs->group->inode_table_block_num);
+
+                return new_entry.inode_idx;
+            }
+        }
+
+    }
+    return FAILED;
 }
 
 /**
@@ -594,7 +599,7 @@ int64_t ext2_add_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name,u
  *
  * @return 成功删除返回0，失败返回-1。
  */
-int64_t ext2_delete_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name)
+int64_t ext2_remove_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *name)
 {
     assert(fs!=NULL,return -1;);
     assert(name!=NULL,return -1;);
@@ -753,7 +758,6 @@ int64_t ext2_create_dir_by_path(ext2_fs_t *fs, const char *path)
     printf("Directory created successfully: %s\n", path);
     return 0; // 成功创建目录
 }
-
 
 int64_t ext2_create_file_by_path(ext2_fs_t *fs, const char *path)
 {
