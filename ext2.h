@@ -26,6 +26,6 @@ extern int64_t ext2_overwrite_file_by_path(ext2_fs_t *fs, const char *path, cons
 extern int64_t ext2_append_file_by_path(ext2_fs_t *fs, const char *path, const void *data, uint64_t size); // 追加写
 extern int64_t ext2_read_file_by_path(ext2_fs_t *fs, const char *path, void *buf); // 读取
 extern int64_t ext2_unlink_by_path(ext2_fs_t *fs, const char *path);
-extern int64_t ext2_get_file_size_by_path(ext2_fs_t *fs, const char *path); // 查询文件大小
-
+extern int64_t ext2_get_inode_size_by_path(ext2_fs_t *fs, const char *path); // 查询文件大小
+extern int64_t ext2_list_dir_by_path(ext2_fs_t *fs,const char *path);
 #endif

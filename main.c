@@ -34,37 +34,27 @@ int main()
     
     uint64_t ret = 0;
     ext2_create_dir_by_path(fs, "/a/b/");
-    ext2_create_file_by_path(fs, "/a/b/testfile.txt");
-    ext2_append_file_by_path(fs, "/a/b/testfile.txt", long_data, BLOCK_SIZE * BLOCK_COUNT);
-    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    // printf("read file /a/b/testfile.txt:\n%s\n",read);
-
-    ext2_unlink_by_path(fs, "/a/b/testfile.txt");
-    ext2_unlink_by_path(fs, "/a/b");
-    ext2_unlink_by_path(fs, "/a");
-
-
-    ext2_create_dir_by_path(fs, "/a/b/");
-    ext2_create_file_by_path(fs, "/a/b/testfile.txt");
-    ext2_append_file_by_path(fs, "/a/b/testfile.txt", long_data, BLOCK_SIZE * BLOCK_COUNT);
-    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    // printf("read file /a/b/testfile.txt:\n%s\n",read);
-
-    ext2_unlink_by_path(fs, "/a/b/testfile.txt");
-    ext2_unlink_by_path(fs, "/a/b");
-    ext2_unlink_by_path(fs, "/a");
     
-    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    // printf("read file /a/b/testfile.txt:\n%s\n",read);
+    ext2_create_file_by_path(fs, "/a/b/testfile.txt");
+    for(uint64_t i = 0; i<20;i++)
+    {
+        sprintf(long_data,"/a/b/testfile%lu.txt",i);
+        ext2_create_file_by_path(fs, long_data);
+        ext2_append_file_by_path(fs, long_data, long_data,strlen(long_data));
+        ext2_read_file_by_path(fs, long_data, read);
+        printf("read file %s:\n%s\n", long_data, read);
+    }
 
-    // ext2_create_file_by_path(fs, "/a/b/testfile.txt");
-    // ext2_append_file_by_path(fs, "/a/b/testfile.txt", "123456789", 10);
-    // ext2_read_file_by_path(fs, "/a/b/testfile.txt", read);
-    // printf("read file /a/b/testfile.txt:\n%s\n",read);
+    
+    ext2_list_dir_by_path(fs,"/");
+    ext2_list_dir_by_path(fs,"/a");
+    ext2_list_dir_by_path(fs,"/a/b");
 
-    // ext2_delete_file_by_path(fs, "/a/b/testfile.txt");
-    // ext2_delete_file_by_path(fs, "/a/b/");
-    // ext2_delete_file_by_path(fs, "/a");
+    ext2_unlink_by_path(fs, "/a/b/testfile.txt");
+    ext2_unlink_by_path(fs, "/a/b");
+    ext2_unlink_by_path(fs, "/a");
+
+
 
 
     return 0;

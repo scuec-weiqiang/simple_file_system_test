@@ -781,6 +781,78 @@ int64_t ext2_remove_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, const char *nam
 }
 
 
+void print_entry(ext2_fs_t *fs,const ext2_dir_entry_t *entry) 
+{
+    // ANSI颜色代码定义
+    #define COLOR_RESET   "\033[0m"      // 重置颜色
+    #define COLOR_BLUE    "\033[1;34m"   // 蓝色（目录）
+    #define COLOR_WHITE   "\033[1;37m"   // 白色（普通文件）
+    #define COLOR_GREEN   "\033[1;32m"   // 绿色（可执行文件）
+    
+    if (entry->inode_idx == 0) {
+        return; // 跳过无效的目录项
+    }
+    
+    // 获取inode信息来判断文件类型
+    ext2_inode_t *inode = &fs->inode_table[entry->inode_idx];
+    
+    // 根据文件类型设置颜色
+    const char *color = COLOR_WHITE; // 默认白色
+    const char *type_indicator = "";
+    
+    if (inode->type == FILE_TYPE_DIR) {
+        color = COLOR_BLUE;
+        type_indicator = "/";
+    } else if (inode->type == FILE_TYPE_FILE) {
+        color = COLOR_WHITE;
+        type_indicator = "";
+    }
+    
+    // 输出带颜色的文件名和类型指示符
+    printf("%s%-20s%s%s  inode: %lu  size: %lu bytes\n", 
+           color, entry->name, type_indicator, COLOR_RESET, 
+           entry->inode_idx, inode->size);
+}
+
+
+/**
+ * @brief 遍历指定目录中的所有目录项
+ *
+ * 该函数用于遍历指定目录中的所有目录项，并对每个目录项执行回调函数。
+ *
+ * @param fs 指向ext2文件系统的指针
+ * @param dir_inode_idx 目录的inode索引
+ * @param callback 回调函数，用于处理每个目录项
+ *
+ * @return 成功返回0，失败返回-1。
+ */
+int64_t ext2_walk_entry(ext2_fs_t *fs, uint64_t dir_inode_idx, void (*callback)(ext2_fs_t *,const ext2_dir_entry_t *)) 
+{
+    assert(fs != NULL,return ERROR_INVALID_ARG;);
+    ext2_inode_t *inode = &fs->inode_table[dir_inode_idx];
+
+    if (inode->type != FILE_TYPE_DIR) {
+        return -1;  // 不是目录
+    }
+
+    uint64_t entries_per_block = BLOCK_SIZE / sizeof(ext2_dir_entry_t);
+    uint8_t block_buf[BLOCK_SIZE];
+
+    for (uint64_t i = 0; i < MAX_BLK_NUM && inode->blk_idx[i]; i++) {
+        disk_read(block_buf, inode->blk_idx[i]);
+        ext2_dir_entry_t *entries = (ext2_dir_entry_t *)block_buf;
+
+        for (uint64_t j = 0; j < entries_per_block; j++) {
+            if (entries[j].inode_idx != 0) {
+                callback(fs,&entries[j]);
+            }
+        }
+    }
+
+    return 0;
+}
+
+
 /**
  * @brief 获取指定inode的大小
  *
@@ -995,6 +1067,7 @@ int64_t ext2_get_path_dirname (char *path,char* dirname)
     
 }
 
+
 /**
  * @brief 根据路径创建目录
  *
@@ -1195,6 +1268,21 @@ int64_t ext2_read_file_by_path(ext2_fs_t *fs, const char *path, void *buf)
     }
     printf("File read successfully: %s\n", path);
     return 0;
+}
+
+
+
+int64_t ext2_list_dir_by_path(ext2_fs_t *fs,const char *path)
+{
+    assert(fs!=NULL&&path!=NULL,return ERROR_INVALID_ARG;);
+    int64_t inode_idx = ext2_find_inode_by_path(fs, path, 0); // 查找路径对应的inode
+    if(inode_idx<0)
+    {
+         printf("Failed to find directory: %s\n", path);
+        return -1; // 返回错误
+    }
+    int64_t ret = ext2_walk_entry(fs, inode_idx, print_entry);
+    return ret;
 }
 
 
